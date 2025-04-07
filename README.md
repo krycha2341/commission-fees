@@ -4,6 +4,9 @@
 
 ## How to run a command
 
+`cp .env.example .env`</br>
+`composer install`</br>
+
 Command signature is as follows:</br>
 `php artisan calculate:commission-fees`
 
