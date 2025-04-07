@@ -29,7 +29,6 @@ class ExternalExchangeRates implements RatesRepository
      */
     public function getRates(string $currency): Collection
     {
-        return collect(['USD' => 1.088519, 'EUR' => 1, 'JPY' => 158.395228]);
         $this->validateCurrency($currency);
 
         if (empty($this->rates->get($currency))) {
@@ -53,7 +52,7 @@ class ExternalExchangeRates implements RatesRepository
         )->getBody()->getContents();
 
         $rates = json_decode($responseJson, true)['rates'];
-        $this->rates->put($currency, $rates);
+        $this->rates->put($currency, collect($rates));
     }
 
     private function validateCurrency(string $currency): void

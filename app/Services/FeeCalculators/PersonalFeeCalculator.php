@@ -23,53 +23,20 @@ class PersonalFeeCalculator extends FeeCalculatorBase implements FeeCalculator
         }
         $config = config('services.fee_calculators.personal');
 
-        $this->filterOutIrrelevantTransactionsAndOrderByDate(
+        $transactions = $this->filterOutIrrelevantTransactionsAndOrderByDate(
             $transaction,
             $transactions,
             $config['fee_free_transaction_types'],
         );
         $this->exchangeCurrencies($transactions, $config['fee_currency']);
-
-        if (
-            in_array($transaction->get('transaction_type'), $config['fee_free_transaction_types'])
-            || !$this->shouldApplyFee($transaction, $transactions)
-        ) {
+        $this->exchangeCurrency($transaction, $config['fee_currency']);
+        if (in_array($transaction->get('transaction_type'), $config['fee_free_transaction_types'])) {
             return 0.0;
         }
 
-        $amount = (float)$transaction->get('amount');
-        if ($transaction->get('currency') !== $config['fee_currency']) {
-            $amount = $this->currencyExchanger->exchange(
-                $amount,
-                (string)$transaction->get('currency'),
-                $config['fee_currency'],
-            );
-        }
+        $amount = $this->getAmountToApplyCommission($transaction, $transactions);
 
         return $this->roundAmount($amount * (float)$config['fee_rate']);
-    }
-
-    private function shouldApplyFee(Collection $transaction, Collection $transactions): bool
-    {
-        $transactionsCounter = 0;
-        $withdrawAmountSum = $transaction->get('amount');
-        foreach ($transactions as $otherTransaction) {
-            if (
-                $transactionsCounter > static::NUMBER_OF_TRANSACTIONS_FEE_FREE
-                || $withdrawAmountSum > static::FEE_FREE_LIMIT
-            ) {
-                return true;
-            }
-
-            if ($otherTransaction->get('id') === $transaction->get('id')) {
-                return false;
-            }
-
-            $withdrawAmountSum += $otherTransaction->get('amount');
-            $transactionsCounter++;
-        }
-
-        return false;
     }
 
     private function getAmountToApplyCommission(Collection $transaction, Collection $transactions): float
@@ -77,15 +44,21 @@ class PersonalFeeCalculator extends FeeCalculatorBase implements FeeCalculator
         $transactionsCounter = 0;
         $withdrawAmountSum = 0;
         foreach ($transactions as $otherTransaction) {
+            $withdrawAmountSum += $otherTransaction->get('amount');
+            $transactionsCounter++;
+
             if ($transactionsCounter > static::NUMBER_OF_TRANSACTIONS_FEE_FREE) {
                 return (float)$transaction->get('amount');
             }
             if ($withdrawAmountSum > static::FEE_FREE_LIMIT) {
-                return (float)$otherTransaction->get('amount') - static::FEE_FREE_LIMIT;
+                if ($transaction->get('id') === $otherTransaction->get('id')) {
+                    return $withdrawAmountSum - static::FEE_FREE_LIMIT;
+                } else {
+                    return (float)$transaction->get('amount');
+                }
+            } elseif ($transaction->get('id') === $otherTransaction->get('id')) {
+                break;
             }
-
-            $withdrawAmountSum += $otherTransaction->get('amount');
-            $transactionsCounter++;
         }
 
         return 0.0;
@@ -95,15 +68,16 @@ class PersonalFeeCalculator extends FeeCalculatorBase implements FeeCalculator
         Collection $transaction,
         Collection $transactions,
         array $feeFreeTransactionTypes,
-    ): void {
+    ): Collection {
         $date = Carbon::createFromFormat('Y-m-d', $transaction->get('date'));
         $userId = $transaction->get('user_id');
-        $transactions->filter(function ($filteredTransaction) use ($date, $userId, $feeFreeTransactionTypes) {
+
+        return $transactions->filter(function ($filteredTransaction) use ($date, $userId, $feeFreeTransactionTypes) {
             $transactionDate = Carbon::createFromFormat('Y-m-d', $filteredTransaction->get('date'));
 
             return $filteredTransaction->get('user_id') === $userId
-                && $transactionDate->between($date->startOfWeek(), $date->endOfWeek())
-                && in_array($filteredTransaction->get('transaction_type'), $feeFreeTransactionTypes);
+                && $transactionDate->between((clone $date)->startOfWeek(), (clone $date)->endOfWeek())
+                && !in_array($filteredTransaction->get('transaction_type'), $feeFreeTransactionTypes);
         })->sortBy(fn ($sortedTransaction) => Carbon::createFromFormat('Y-m-d', $sortedTransaction->get('date')));
     }
 
@@ -115,15 +89,20 @@ class PersonalFeeCalculator extends FeeCalculatorBase implements FeeCalculator
                 continue;
             }
 
-            $transaction->put('currency', $toCurrency);
-            $transaction->put(
-                'amount',
-                $this->currencyExchanger->exchange(
-                    (float)$transaction->get('amount'),
-                    (string)$transaction->get('currency'),
-                    $toCurrency,
-                )
-            );
+            $this->exchangeCurrency($transaction, $toCurrency);
         }
+    }
+
+    private function exchangeCurrency(Collection $transaction, string $toCurrency): void
+    {
+        $transaction->put(
+            'amount',
+            (string)$this->currencyExchanger->exchange(
+                (float)$transaction->get('amount'),
+                (string)$transaction->get('currency'),
+                $toCurrency,
+            )
+        );
+        $transaction->put('currency', $toCurrency);
     }
 }
