@@ -19,6 +19,6 @@ When being in a project root dir (cd $HOME/project-name):</br>
 
 ## Summary
 
-There is a lot of places that should be improved, but it requires a lot more time to work on those
+There is a lot of places that should be improved 
 (e.g. DTO/VOs for data transfer, config fetching improvements, singleton to save on external API
 calls because of the limits, Dockerfile)
